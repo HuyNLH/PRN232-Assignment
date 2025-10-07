@@ -106,11 +106,11 @@ using (var scope = app.Services.CreateScope())
     try
     {
         // Simple connection test without table creation
-        var connectionString = context.Database.GetConnectionString();
-        Console.WriteLine($"Database configured with masked connection: {MaskConnectionString(connectionString ?? "null")}");
+        var dbConnectionString = context.Database.GetConnectionString();
+        Console.WriteLine($"Database configured with masked connection: {MaskConnectionString(dbConnectionString ?? "null")}");
         
         // Test basic connection (this should work even if tables don't exist)
-        context.Database.GetDbConnection().ConnectionString = connectionString;
+        context.Database.GetDbConnection().ConnectionString = dbConnectionString;
         Console.WriteLine("Database context initialized successfully");
     }
     catch (Exception ex)
