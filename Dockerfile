@@ -21,16 +21,13 @@ WORKDIR /app
 # Copy published application
 COPY --from=build /app/publish .
 
-# Create startup script for the API with environment debugging
+# Copy connection test script
+COPY test-connection.sh /app/test-connection.sh
+RUN chmod +x /app/test-connection.sh
+
+# Create startup script for the API with connection testing
 RUN echo '#!/bin/bash\n\
-echo "=== Starting ECommerceApp.API ==="\n\
-echo "Environment Variables:"\n\
-echo "DB_HOST: $DB_HOST"\n\
-echo "DB_PORT: $DB_PORT"\n\
-echo "DB_NAME: $DB_NAME"\n\
-echo "DB_USER: $DB_USER"\n\
-echo "DB_PASSWORD: [MASKED]"\n\
-echo ""\n\
+./test-connection.sh\n\
 echo "Starting .NET API..."\n\
 exec dotnet ECommerceApp.API.dll' > /app/start.sh
 
