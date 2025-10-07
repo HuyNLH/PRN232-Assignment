@@ -21,13 +21,22 @@ WORKDIR /app
 # Copy published application
 COPY --from=build /app/publish .
 
-# Copy connection test script
-COPY test-connection.sh /app/test-connection.sh
-RUN chmod +x /app/test-connection.sh
-
-# Create startup script for the API with connection testing
+# Create startup script with embedded connection testing
 RUN echo '#!/bin/bash\n\
-./test-connection.sh\n\
+echo "=== ECommerceApp.API Starting ==="\n\
+echo "Environment Variables:"\n\
+echo "DB_HOST: ${DB_HOST:-NOT_SET}"\n\
+echo "DB_PORT: ${DB_PORT:-NOT_SET}"\n\
+echo "DB_NAME: ${DB_NAME:-NOT_SET}"\n\
+echo "DB_USER: ${DB_USER:-NOT_SET}"\n\
+echo "DB_PASSWORD: ${DB_PASSWORD:+[SET]}"\n\
+echo ""\n\
+if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ] || [ -z "$DB_NAME" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then\n\
+    echo "⚠️ Some environment variables are missing!"\n\
+else\n\
+    echo "✅ All required environment variables are set"\n\
+fi\n\
+echo ""\n\
 echo "Starting .NET API..."\n\
 exec dotnet ECommerceApp.API.dll' > /app/start.sh
 
