@@ -125,13 +125,30 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger"; // Set Swagger UI at /swagger
 });
 
-app.UseHttpsRedirection();
+// Only use HTTPS redirection in Development
+if (app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.UseCors("AllowReactApp");
 
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Add a simple health check endpoint
+app.MapGet("/", () => new { 
+    status = "API is running", 
+    environment = app.Environment.EnvironmentName,
+    timestamp = DateTime.UtcNow 
+});
+
+app.MapGet("/health", () => new { 
+    status = "healthy", 
+    environment = app.Environment.EnvironmentName,
+    timestamp = DateTime.UtcNow 
+});
 
 // Log database configuration without testing connection
 Console.WriteLine("Database configuration completed");
