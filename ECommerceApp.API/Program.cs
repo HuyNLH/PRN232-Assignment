@@ -154,4 +154,24 @@ app.MapGet("/health", () => new {
 Console.WriteLine("Database configuration completed");
 Console.WriteLine("API will connect to database on first request");
 
+// Auto-migrate database on startup (Production only)
+if (app.Environment.IsProduction())
+{
+    try
+    {
+        using (var scope = app.Services.CreateScope())
+        {
+            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            Console.WriteLine("Attempting database migration...");
+            context.Database.Migrate();
+            Console.WriteLine("Database migration completed successfully");
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Database migration failed: {ex.Message}");
+        // Don't stop the app, let it try to connect later
+    }
+}
+
 app.Run();
