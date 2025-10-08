@@ -1,5 +1,24 @@
 using ECommerceApp.API.Data;
 using Microsoft.EntityFrameworkCore;
+using DotNetEnv;
+
+// Load environment variables from .env file in parent directory
+var envPath = Path.Combine(Directory.GetCurrentDirectory(), "..", ".env");
+if (File.Exists(envPath))
+{
+    Env.Load(envPath);
+    Console.WriteLine($"Loaded .env from: {envPath}");
+}
+else 
+{
+    Console.WriteLine($".env file not found at: {envPath}");
+    // Try current directory
+    if (File.Exists(".env"))
+    {
+        Env.Load();
+        Console.WriteLine("Loaded .env from current directory");
+    }
+}
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -9,12 +28,19 @@ builder.Services.AddControllers();
 // Build PostgreSQL connection string from environment variables
 var connectionString = BuildConnectionString() 
     ?? GetSafeConnectionString() 
-    ?? "Host=localhost;Port=5432;Database=ecommerce;Username=postgres;Password=postgres";
+    ?? "Host=localhost;Port=5432;Database=ecommerce;Username=postgres;Password=postgres;Connect Timeout=30;Command Timeout=30";
 
 Console.WriteLine($"Using connection: {MaskConnectionString(connectionString)}");
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString));
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.CommandTimeout(30); // 30 second timeout
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(5),
+            errorCodesToAdd: null);
+    }));
 
 // Helper method to build connection string from environment variables
 string? BuildConnectionString()
@@ -34,7 +60,7 @@ string? BuildConnectionString()
         return null;
     }
 
-    var connStr = $"Host={host};Port={port ?? "5432"};Database={database};Username={username};Password={password}";
+    var connStr = $"Host={host};Port={port ?? "5432"};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true;Timeout=30";
     Console.WriteLine("Successfully built connection string from environment variables");
     return connStr;
 }
@@ -99,31 +125,8 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Test database connection without creating tables
-using (var scope = app.Services.CreateScope())
-{
-    var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-    try
-    {
-        // Simple connection test without table creation
-        var dbConnectionString = context.Database.GetConnectionString();
-        Console.WriteLine($"Database configured with masked connection: {MaskConnectionString(dbConnectionString ?? "null")}");
-        
-        // Test basic connection (this should work even if tables don't exist)
-        context.Database.GetDbConnection().ConnectionString = dbConnectionString;
-        Console.WriteLine("Database context initialized successfully");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"Database initialization error: {ex.Message}");
-        Console.WriteLine($"Error type: {ex.GetType().Name}");
-        if (ex.InnerException != null)
-        {
-            Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
-        }
-        // Continue anyway - API can still start
-        Console.WriteLine("Continuing without database initialization...");
-    }
-}
+// Log database configuration without testing connection
+Console.WriteLine("Database configuration completed");
+Console.WriteLine("API will connect to database on first request");
 
 app.Run();
