@@ -2,22 +2,28 @@ using ECommerceApp.API.Data;
 using Microsoft.EntityFrameworkCore;
 using DotNetEnv;
 
-// Load environment variables from .env file in parent directory
-var envPath = Path.Combine(Directory.GetCurrentDirectory(), "..", ".env");
-if (File.Exists(envPath))
+// Load environment variables from .env file (development only)
+if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") != "Production")
 {
-    Env.Load(envPath);
-    Console.WriteLine($"Loaded .env from: {envPath}");
-}
-else 
-{
-    Console.WriteLine($".env file not found at: {envPath}");
-    // Try current directory
-    if (File.Exists(".env"))
+    var envPath = Path.Combine(Directory.GetCurrentDirectory(), "..", ".env");
+    if (File.Exists(envPath))
+    {
+        Env.Load(envPath);
+        Console.WriteLine($"Loaded .env from: {envPath}");
+    }
+    else if (File.Exists(".env"))
     {
         Env.Load();
         Console.WriteLine("Loaded .env from current directory");
     }
+    else
+    {
+        Console.WriteLine("No .env file found - using system environment variables");
+    }
+}
+else
+{
+    Console.WriteLine("Production environment - using system environment variables only");
 }
 
 var builder = WebApplication.CreateBuilder(args);
@@ -111,11 +117,13 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Enable Swagger in all environments for testing
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ECommerceApp API V1");
+    c.RoutePrefix = "swagger"; // Set Swagger UI at /swagger
+});
 
 app.UseHttpsRedirection();
 
