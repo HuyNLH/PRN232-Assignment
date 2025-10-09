@@ -45,23 +45,21 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(finalConnectionString);
 });
 
-// Add CORS
+// Add CORS - Allow all Vercel deployments and localhost
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend",
         policy =>
         {
-            policy.WithOrigins(
-                "http://localhost:3000",
-                "https://localhost:3000",
-                "prn-232-assignment-rmjotwcar-huynlh04s-projects.vercel.app"
-            )
-            .SetIsOriginAllowed(origin =>
+            policy.SetIsOriginAllowed(origin =>
             {
-                // Allow any Vercel app domain
-                return origin.Contains("vercel.app") ||
-                       origin.StartsWith("http://localhost") ||
-                       origin.StartsWith("https://localhost");
+                // Allow any Vercel deployment domain
+                if (origin.Contains("vercel.app")) return true;
+                
+                // Allow localhost for development
+                if (origin.StartsWith("http://localhost") || origin.StartsWith("https://localhost")) return true;
+                
+                return false;
             })
             .AllowAnyHeader()
             .AllowAnyMethod()
