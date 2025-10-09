@@ -1,7 +1,11 @@
 import axios, { AxiosResponse } from 'axios';
 import { Product, ProductCreateRequest, ProductUpdateRequest, ProductsResponse } from '../types';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+// Ensure the API base URL always includes the `/api` path.
+const rawBase = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+const API_BASE_URL = rawBase.endsWith('/api') || rawBase.endsWith('/api/')
+  ? rawBase.replace(/\/$/, '') // strip trailing slash
+  : rawBase.replace(/\/$/, '') + '/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
