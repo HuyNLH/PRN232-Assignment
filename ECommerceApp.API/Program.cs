@@ -1,181 +1,220 @@
 using ECommerceApp.API.Data;
 using Microsoft.EntityFrameworkCore;
-using DotNetEnv;
-
-// Load environment variables from .env file (development only)
-if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") != "Production")
-{
-    var envPath = Path.Combine(Directory.GetCurrentDirectory(), "..", ".env");
-    if (File.Exists(envPath))
-    {
-        Env.Load(envPath);
-        Console.WriteLine($"Loaded .env from: {envPath}");
-    }
-    else if (File.Exists(".env"))
-    {
-        Env.Load();
-        Console.WriteLine("Loaded .env from current directory");
-    }
-    else
-    {
-        Console.WriteLine("No .env file found - using system environment variables");
-    }
-}
-else
-{
-    Console.WriteLine("Production environment - using system environment variables only");
-}
+using Npgsql;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Configure port for Render deployment
-var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
-builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
-
 // Add services to the container.
 builder.Services.AddControllers();
-
-// Build PostgreSQL connection string from environment variables
-var connectionString = BuildConnectionString() 
-    ?? GetSafeConnectionString() 
-    ?? "Host=localhost;Port=5432;Database=ecommerce;Username=postgres;Password=postgres;Connect Timeout=30;Command Timeout=30";
-
-Console.WriteLine($"Using connection: {MaskConnectionString(connectionString)}");
-
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(connectionString, npgsqlOptions =>
-    {
-        npgsqlOptions.CommandTimeout(30); // 30 second timeout
-        npgsqlOptions.EnableRetryOnFailure(
-            maxRetryCount: 3,
-            maxRetryDelay: TimeSpan.FromSeconds(5),
-            errorCodesToAdd: null);
-    }));
-
-// Helper method to build connection string from environment variables
-string? BuildConnectionString()
-{
-    var host = Environment.GetEnvironmentVariable("DB_HOST");
-    var port = Environment.GetEnvironmentVariable("DB_PORT");
-    var database = Environment.GetEnvironmentVariable("DB_NAME");
-    var username = Environment.GetEnvironmentVariable("DB_USER");
-    var password = Environment.GetEnvironmentVariable("DB_PASSWORD");
-
-    Console.WriteLine($"Environment check - Host: {!string.IsNullOrEmpty(host)}, Port: {port}, DB: {!string.IsNullOrEmpty(database)}, User: {!string.IsNullOrEmpty(username)}, Password: {!string.IsNullOrEmpty(password)}");
-
-    if (string.IsNullOrEmpty(host) || string.IsNullOrEmpty(database) || 
-        string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
-    {
-        Console.WriteLine("Missing required environment variables for database connection");
-        return null;
-    }
-
-    var connStr = $"Host={host};Port={port ?? "5432"};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true;Timeout=30";
-    Console.WriteLine("Successfully built connection string from environment variables");
-    return connStr;
-}
-
-// Safe method to get connection string from config (avoid template variables)
-string? GetSafeConnectionString()
-{
-    var configConnStr = builder.Configuration.GetConnectionString("DefaultConnection");
-    
-    if (!string.IsNullOrEmpty(configConnStr) && configConnStr.Contains("${"))
-    {
-        Console.WriteLine("Skipping appsettings connection string with template variables");
-        return null;
-    }
-    
-    Console.WriteLine("Using connection string from appsettings");
-    return configConnStr;
-}
-
-// Helper to mask passwords in logs
-string MaskConnectionString(string connectionString)
-{
-    if (string.IsNullOrEmpty(connectionString)) return "null";
-    return System.Text.RegularExpressions.Regex.Replace(connectionString, 
-        @"Password=([^;]+)", "Password=***", 
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-}
-
-// Add CORS with configurable origins
-var allowedOrigins = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS")?.Split(',') 
-    ?? new[] { "http://localhost:3000", "https://localhost:3000" };
-
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowReactApp", policy =>
-    {
-        policy.WithOrigins(allowedOrigins)
-              .AllowAnyHeader()
-              .AllowAnyMethod()
-              .WithExposedHeaders("X-Total-Count", "X-Page", "X-Page-Size");
-    });
-});
-
-// Add API Explorer services
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-var app = builder.Build();
+// Helper: detect template placeholders (Render/CI templates like ${DB_PORT})
+static bool IsTemplate(string? s) => !string.IsNullOrEmpty(s) && s.Contains("${");
 
-// Configure the HTTP request pipeline.
-// Enable Swagger in all environments for testing
-app.UseSwagger();
-app.UseSwaggerUI(c =>
+// Build a validated connection string or return null if missing/invalid
+string? BuildConnectionString()
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ECommerceApp API V1");
-    c.RoutePrefix = "swagger"; // Set Swagger UI at /swagger
-});
+    // 1) Try DATABASE_URL (Heroku-style)
+    var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+    if (!string.IsNullOrEmpty(databaseUrl) && !IsTemplate(databaseUrl))
+    {
+        try
+        {
+            var uri = new Uri(databaseUrl);
+            var userInfo = uri.UserInfo.Split(':', 2);
+            var username = userInfo.Length > 0 ? userInfo[0] : string.Empty;
+            var password = userInfo.Length > 1 ? userInfo[1] : string.Empty;
+            var host = uri.Host;
+            var port = uri.Port > 0 ? uri.Port : 5432;
+            var database = uri.AbsolutePath?.TrimStart('/') ?? string.Empty;
 
-// Only use HTTPS redirection in Development
-if (app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
+            var csb = new NpgsqlConnectionStringBuilder
+            {
+                Host = host,
+                Port = port,
+                Database = database,
+                Username = username,
+                Password = password,
+                SslMode = SslMode.Prefer,
+                Timeout = 30
+            };
+
+            Console.WriteLine($"Database connection configured from DATABASE_URL: Host={host}, Database={database}");
+            return csb.ToString();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Connection string parsing failed: {ex.Message}");
+            // fallback to per-field env
+        }
+    }
+
+    // 2) Try individual environment variables
+    var hostEnv = Environment.GetEnvironmentVariable("DB_HOST");
+    var portEnv = Environment.GetEnvironmentVariable("DB_PORT");
+    var nameEnv = Environment.GetEnvironmentVariable("DB_NAME");
+    var userEnv = Environment.GetEnvironmentVariable("DB_USER");
+    var passEnv = Environment.GetEnvironmentVariable("DB_PASSWORD");
+
+    if (IsTemplate(hostEnv) || IsTemplate(portEnv) || IsTemplate(nameEnv) || IsTemplate(userEnv) || IsTemplate(passEnv))
+    {
+        Console.WriteLine("Detected template placeholders in DB env vars; skipping using them at runtime.");
+        return null;
+    }
+
+    if (string.IsNullOrEmpty(hostEnv) || string.IsNullOrEmpty(nameEnv) || string.IsNullOrEmpty(userEnv) || string.IsNullOrEmpty(passEnv))
+    {
+        Console.WriteLine("One or more DB_* environment variables are missing; skipping DB configuration.");
+        return null;
+    }
+
+    if (!string.IsNullOrEmpty(portEnv) && !int.TryParse(portEnv, out var portValue))
+    {
+        Console.WriteLine($"Invalid DB_PORT value: '{portEnv}'");
+        return null;
+    }
+
+    var portFinal = string.IsNullOrEmpty(portEnv) ? 5432 : int.Parse(portEnv!);
+
+    var builderCsb = new NpgsqlConnectionStringBuilder
+    {
+        Host = hostEnv,
+        Port = portFinal,
+        Database = nameEnv,
+        Username = userEnv,
+        Password = passEnv,
+    SslMode = SslMode.Prefer,
+        Timeout = 30
+    };
+
+    Console.WriteLine($"Database connection configured from DB_* env: Host={hostEnv}, Database={nameEnv}");
+    return builderCsb.ToString();
 }
 
-app.UseCors("AllowReactApp");
-
-app.UseAuthorization();
-
-app.MapControllers();
-
-// Add a simple health check endpoint
-app.MapGet("/", () => new { 
-    status = "API is running", 
-    environment = app.Environment.EnvironmentName,
-    timestamp = DateTime.UtcNow 
-});
-
-app.MapGet("/health", () => new { 
-    status = "healthy", 
-    environment = app.Environment.EnvironmentName,
-    timestamp = DateTime.UtcNow 
-});
-
-// Log database configuration without testing connection
-Console.WriteLine("Database configuration completed");
-Console.WriteLine("API will connect to database on first request");
-
-// Auto-migrate database on startup (Production only)
-if (app.Environment.IsProduction())
+// Determine final connection string: env-built or appsettings (if appsettings not templated)
+var finalConnectionString = BuildConnectionString();
+if (string.IsNullOrEmpty(finalConnectionString))
 {
+    var cfg = builder.Configuration.GetConnectionString("DefaultConnection");
+    if (!string.IsNullOrEmpty(cfg) && !IsTemplate(cfg))
+    {
+        finalConnectionString = cfg;
+        Console.WriteLine("Using connection string from configuration (appsettings).");
+    }
+}
+
+// Register DbContext. If no valid connection string, register an in-memory DB so the app can start.
+if (!string.IsNullOrEmpty(finalConnectionString))
+{
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    {
+        options.UseNpgsql(finalConnectionString);
+    });
+}
+else
+{
+    Console.WriteLine("No valid database connection available - registering InMemory provider so the app can start.");
+    builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    {
+        options.UseInMemoryDatabase("InMemoryDb");
+    });
+}
+
+// Add CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowFrontend",
+        policy =>
+        {
+            policy.WithOrigins(
+                "http://localhost:3000",
+                "https://localhost:3000"
+            )
+            .SetIsOriginAllowed(origin =>
+            {
+                // Allow any Vercel app domain
+                return origin.Contains("vercel.app") ||
+                       origin.StartsWith("http://localhost") ||
+                       origin.StartsWith("https://localhost");
+            })
+            .AllowAnyHeader()
+            .AllowAnyMethod()
+            .AllowCredentials();
+        });
+});
+
+var app = builder.Build();
+
+// Apply database migrations automatically, but only when we have a relational DB
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+    var logger = services.GetRequiredService<ILogger<Program>>();
+    var context = services.GetRequiredService<ApplicationDbContext>();
+
     try
     {
-        using (var scope = app.Services.CreateScope())
+        if (string.IsNullOrEmpty(finalConnectionString))
         {
-            var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            Console.WriteLine("Attempting database migration...");
-            context.Database.Migrate();
-            Console.WriteLine("Database migration completed successfully");
+            logger.LogInformation("No valid connection string - skipping database migrations.");
+        }
+        else if (!context.Database.IsRelational())
+        {
+            logger.LogInformation("Database provider is not relational - skipping relational migration operations.");
+        }
+        else
+        {
+            logger.LogInformation("Checking for pending database migrations...");
+
+            var pendingMigrations = await context.Database.GetPendingMigrationsAsync();
+            if (pendingMigrations.Any())
+            {
+                logger.LogInformation($"Found {pendingMigrations.Count()} pending migration(s)");
+                foreach (var migration in pendingMigrations)
+                {
+                    logger.LogInformation($"  - {migration}");
+                }
+
+                logger.LogInformation("Applying migrations...");
+                await context.Database.MigrateAsync();
+                logger.LogInformation("All migrations applied successfully!");
+            }
+            else
+            {
+                logger.LogInformation("Database is up to date - no pending migrations");
+            }
+
+            var appliedMigrations = await context.Database.GetAppliedMigrationsAsync();
+            logger.LogInformation($"Total applied migrations: {appliedMigrations.Count()}");
         }
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Database migration failed: {ex.Message}");
-        // Don't stop the app, let it try to connect later
+        logger.LogError(ex, "Error during database migration: {Message}", ex.Message);
+        logger.LogError("Application will continue but database operations may fail");
+        // Don't throw - let the app start
     }
 }
+
+// Configure the HTTP request pipeline
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "ECommerce API V1");
+    c.RoutePrefix = "swagger";
+});
+
+// Middleware pipeline
+app.UseCors("AllowFrontend");
+app.UseAuthorization();
+app.MapControllers();
+
+// Configure port
+var port = Environment.GetEnvironmentVariable("PORT") ?? "80";
+var urls = $"http://0.0.0.0:{port}";
+app.Urls.Add(urls);
+
+Console.WriteLine($"Application started successfully on {urls}");
 
 app.Run();
