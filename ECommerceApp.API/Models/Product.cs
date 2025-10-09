@@ -18,7 +18,7 @@ namespace ECommerceApp.API.Models
         [Range(0.01, double.MaxValue, ErrorMessage = "Price must be greater than 0")]
         public decimal Price { get; set; }
         
-        [Url]
+        [StringLength(500)]
         public string? Image { get; set; }
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
