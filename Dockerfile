@@ -1,54 +1,34 @@
-# Backend-only Dockerfile for Render deployment
-# This builds and deploys only the ECommerceApp.API
-
-# Build stage: Use .NET SDK to build the application
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+# Use the official .NET 8 runtime as base image
+FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
 WORKDIR /app
+EXPOSE 80
+EXPOSE 443
+
+# Use the .NET 8 SDK for building
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+WORKDIR /src
 
 # Copy project file and restore dependencies
-COPY ECommerceApp.API/*.csproj ./ECommerceApp.API/
-RUN dotnet restore ECommerceApp.API/ECommerceApp.API.csproj
+COPY ["ECommerceApp.API/ECommerceApp.API.csproj", "ECommerceApp.API/"]
+RUN dotnet restore "ECommerceApp.API/ECommerceApp.API.csproj"
 
-# Copy source code and build
-COPY ECommerceApp.API/ ./ECommerceApp.API/
-WORKDIR /app/ECommerceApp.API
-RUN dotnet publish -c Release -o /app/publish
+# Copy all source code
+COPY . .
+WORKDIR "/src/ECommerceApp.API"
 
-# Runtime stage: Use ASP.NET Core runtime for production
-FROM mcr.microsoft.com/dotnet/aspnet:8.0
+# Build the application
+RUN dotnet build "ECommerceApp.API.csproj" -c Release -o /app/build
+
+# Publish the application
+FROM build AS publish
+RUN dotnet publish "ECommerceApp.API.csproj" -c Release -o /app/publish /p:UseAppHost=false
+
+# Final stage - runtime
+FROM base AS final
 WORKDIR /app
+COPY --from=publish /app/publish .
 
-# Copy published application
-COPY --from=build /app/publish .
+# Set environment variable for port
+ENV ASPNETCORE_URLS=http://+:$PORT
 
-# Create startup script with embedded connection testing
-RUN echo '#!/bin/bash\n\
-echo "=== ECommerceApp.API Starting ==="\n\
-echo "Environment Variables:"\n\
-echo "DB_HOST: ${DB_HOST:-NOT_SET}"\n\
-echo "DB_PORT: ${DB_PORT:-NOT_SET}"\n\
-echo "DB_NAME: ${DB_NAME:-NOT_SET}"\n\
-echo "DB_USER: ${DB_USER:-NOT_SET}"\n\
-echo "DB_PASSWORD: ${DB_PASSWORD:+[SET]}"\n\
-echo "PORT: ${PORT:-NOT_SET}"\n\
-echo "ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-NOT_SET}"\n\
-echo ""\n\
-if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ] || [ -z "$DB_NAME" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then\n\
-    echo "⚠️ Some database environment variables are missing!"\n\
-else\n\
-    echo "✅ All required database environment variables are set"\n\
-fi\n\
-echo ""\n\
-echo "Starting .NET API on port ${PORT:-5000}..."\n\
-exec dotnet ECommerceApp.API.dll' > /app/start.sh
-
-RUN chmod +x /app/start.sh
-
-# Expose only the API port
-EXPOSE 5000
-
-# Set production environment variables
-ENV ASPNETCORE_ENVIRONMENT=Production
-
-# Start the API
-CMD ["./start.sh"]
+ENTRYPOINT ["dotnet", "ECommerceApp.API.dll"]
