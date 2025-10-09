@@ -30,14 +30,16 @@ echo "DB_PORT: ${DB_PORT:-NOT_SET}"\n\
 echo "DB_NAME: ${DB_NAME:-NOT_SET}"\n\
 echo "DB_USER: ${DB_USER:-NOT_SET}"\n\
 echo "DB_PASSWORD: ${DB_PASSWORD:+[SET]}"\n\
+echo "PORT: ${PORT:-NOT_SET}"\n\
+echo "ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-NOT_SET}"\n\
 echo ""\n\
 if [ -z "$DB_HOST" ] || [ -z "$DB_PORT" ] || [ -z "$DB_NAME" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then\n\
-    echo "⚠️ Some environment variables are missing!"\n\
+    echo "⚠️ Some database environment variables are missing!"\n\
 else\n\
-    echo "✅ All required environment variables are set"\n\
+    echo "✅ All required database environment variables are set"\n\
 fi\n\
 echo ""\n\
-echo "Starting .NET API..."\n\
+echo "Starting .NET API on port ${PORT:-5000}..."\n\
 exec dotnet ECommerceApp.API.dll' > /app/start.sh
 
 RUN chmod +x /app/start.sh
@@ -47,7 +49,6 @@ EXPOSE 5000
 
 # Set production environment variables
 ENV ASPNETCORE_ENVIRONMENT=Production
-ENV ASPNETCORE_URLS=http://0.0.0.0:5000
 
 # Start the API
 CMD ["./start.sh"]

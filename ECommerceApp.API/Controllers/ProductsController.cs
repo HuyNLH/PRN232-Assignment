@@ -16,6 +16,13 @@ namespace ECommerceApp.API.Controllers
             _context = context;
         }
 
+        // GET: api/products/test
+        [HttpGet("test")]
+        public ActionResult<object> TestEndpoint()
+        {
+            return Ok(new { message = "Products controller is working", timestamp = DateTime.UtcNow });
+        }
+
         // GET: api/products
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Product>>> GetProducts(
