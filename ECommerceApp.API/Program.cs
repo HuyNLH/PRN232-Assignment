@@ -130,7 +130,7 @@ builder.Services.AddCors(options =>
             policy.WithOrigins(
                 "http://localhost:3000",
                 "https://localhost:3000",
-                "https://prn-232-assignment-gamma.vercel.app"
+                "prn-232-assignment-rmjotwcar-huynlh04s-projects.vercel.app"
             )
             .SetIsOriginAllowed(origin =>
             {
